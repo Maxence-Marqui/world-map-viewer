@@ -58,23 +58,6 @@ class Area:
 
         starting_x = indexes["starting_x"] 
         ending_x = indexes["ending_x"]
-        
-
-        """if zoom_level == 4:            
-            ending_y = int(MAP_DIMENSIONS[0] / 2)
-            ending_x = int(MAP_DIMENSIONS[1] / 2)
-
-        if zoom_level == 3:            
-            ending_y = int(MAP_DIMENSIONS[0] / 4)
-            ending_x = int(MAP_DIMENSIONS[1] / 4)
-            
-        if zoom_level == 2:            
-            ending_y = int(MAP_DIMENSIONS[0] / 10)
-            ending_x = int(MAP_DIMENSIONS[1] / 10)
-            
-        if zoom_level == 1:            
-            ending_y = int(MAP_DIMENSIONS[0] / 20)
-            ending_x = int(MAP_DIMENSIONS[1] / 20)"""
 
         sub_raster = self.get_zoomed_raster(self.raster, zoom_level)
         sub_raster = self.get_subset_of_nodes(sub_raster, starting_y, ending_y, starting_x, ending_x)
@@ -89,16 +72,16 @@ class Area:
             return raster
         
         if zoom_level == 4:
-            return raster[::2, ::2]#[::2]
+            return raster[::2,::2]
         
         if zoom_level == 3:
-            return raster[::4][::4]
+            return raster[::4,::4]
         
         if zoom_level == 2:
-            return raster[::10][::10]
+            return raster[::10,::10]
         
         if zoom_level == 1:
-            return raster[::20][::20]
+            return raster[::20,::20]
 
 
 @lru_cache
