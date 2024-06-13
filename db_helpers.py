@@ -31,6 +31,7 @@ def get_raster(rid):
         return False
     return area
 
+
 def get_multiple_rasters(rids):
     rids = tuple(rids)
     request = """SELECT rid, ST_AsGDALRaster(rast, 'GTiff') FROM a_world_map WHERE rid IN %s"""

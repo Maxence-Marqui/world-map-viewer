@@ -7,8 +7,9 @@ if __name__ == "__main__":
     
     #profiler = cProfile.Profile()
     #profiler.enable()
+    
     map = WorldMap(601)
-    #map = WorldMap(2000)
+
     #print(len(map.color_set))
     #s = io.StringIO()
     #profiler.disable()

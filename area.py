@@ -1,6 +1,7 @@
 import tempfile
 import rasterio
 from db_helpers import get_raster, get_multiple_rasters
+
 from pygame_config import *
 from typing import List, Tuple
 from functools import lru_cache, wraps
@@ -28,6 +29,7 @@ class Area:
         print(f"Loaded Raster {self.rid}: {self.position}")
         #self.load_area()
 
+
     def load_area(self) -> bool:
         if self.raster: return
         
@@ -42,7 +44,7 @@ class Area:
 
         print(f"Loaded Raster {self.rid}: {self.position}")
         return True
-    
+   
     def convert_binary_to_np(self, raster_binary):
 
         with tempfile.NamedTemporaryFile() as tmpfile:

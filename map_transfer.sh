@@ -1,7 +1,5 @@
 #!/bin/bash
 
-#On créer la table + remplissage avec le premier raster
-
 MAPS_DIR="maps"
 
 #raster2pgsql -C -I -P -t 300x200 a_world_map.tif  > test_raster.sql

@@ -3,6 +3,7 @@ from typing import Tuple, Dict, List
 import pygame
 from pygame.locals import *
 from functools import lru_cache, wraps
+
 from db_helpers import get_multiple_rasters
 
 from pygame_config import *
@@ -12,6 +13,7 @@ import numpy as np
 
 from time import time
 from math import floor
+
 
 def timing(f):
     @wraps(f)
@@ -85,12 +87,11 @@ class WorldMap():
 
             if self.render_type == FULL_RERENDER: pygame.display.flip()
             if self.render_type == PARTIAL_RERENDER: pygame.display.update(to_update) 
-
+        
     def handle_click(self):
         pass
 
     def handle_mouse_wheel(self, direction):
-        pass
         if direction == 1:
             self.zoom_level += 1
         if direction == -1:
@@ -306,7 +307,6 @@ class WorldMap():
         return areas
     
     def get_chunks_and_informations(self):
-
         chunks_informations = {}
 
         if self.zoom_level == 5: zoom_modificator = 1
@@ -394,3 +394,4 @@ def interpolate(color_a, color_b, t):
 
 def round_to_nearest_x(x, base_value):
     return x * round(base_value / x)
+
