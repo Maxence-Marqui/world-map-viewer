@@ -30,3 +30,23 @@ def get_raster(rid):
     if not area:
         return False
     return area
+
+
+def get_multiple_rasters(rids):
+    rids = tuple(rids)
+    request = """SELECT rid, ST_AsGDALRaster(rast, 'GTiff') FROM a_world_map WHERE rid IN %s"""
+
+    try:
+        connection = connect_to_db()
+        cursor = connection.cursor()
+        cursor.execute(request, (rids,))
+        areas = cursor.fetchall()
+    except Exception as e:
+        print(e)
+    finally:
+        cursor.close()
+        connection.close()
+    
+    if not areas:
+        return False
+    return areas

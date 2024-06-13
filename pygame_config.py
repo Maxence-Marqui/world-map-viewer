@@ -24,5 +24,25 @@ DARKER_RED = (124, 44, 44)
 
 FPS = 240
 ZOOM_LEVEL = 5
+ZOOM_LVL_MODIFICATOR = {
+    5: 1,
+    4: 2,
+    3: 4,
+    2: 10,
+    1: 20
+}
+
+STARTING_INDEXES = {
+    5: (0,0),
+    4: (0,0),
+    3: (-1, -1),
+    2: (-4, -4),
+    1: (-9, -9)
+}
+
+MAP_DIMENSIONS = (200, 300)
 
 NODE_SIZE = 4
+
+FULL_RERENDER = "full"
+PARTIAL_RERENDER  = "partial"

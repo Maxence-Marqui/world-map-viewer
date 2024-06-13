@@ -1,6 +1,7 @@
 import tempfile
 import rasterio
-from db_helpers import get_raster
+from db_helpers import get_raster, get_multiple_rasters
+
 from pygame_config import *
 from typing import List, Tuple
 from functools import lru_cache, wraps
@@ -21,11 +22,13 @@ def timing(f):
 
 
 class Area:
-    def __init__(self, rid: int, raster_position: Tuple[int, int]) -> None:
+    def __init__(self, rid: int, raster_position: Tuple[int, int], raster_binary) -> None:
         self.rid: int = rid
         self.position = raster_position
-        self.raster: np.ndarray = []
-        self.load_area()
+        self.raster: np.ndarray = self.convert_binary_to_np(raster_binary)
+        print(f"Loaded Raster {self.rid}: {self.position}")
+        #self.load_area()
+
 
     def load_area(self) -> bool:
         if self.raster: return
@@ -41,33 +44,46 @@ class Area:
 
         print(f"Loaded Raster {self.rid}: {self.position}")
         return True
+   
+    def convert_binary_to_np(self, raster_binary):
+
+        with tempfile.NamedTemporaryFile() as tmpfile:
+            tmpfile.write(raster_binary)
+            with rasterio.open(tmpfile.name) as dataset:
+                return dataset.read()[0]
+
     
     def get_displayed_nodes(self, zoom_level: int, indexes: dict):
 
-        sub_raster = self.get_subset_of_nodes(indexes["starting_y"], indexes["ending_y"], indexes["starting_x"], indexes["ending_x"])
-        sub_raster = self.get_zoomed_raster(sub_raster,zoom_level)
-        
+        starting_y = indexes["starting_y"] 
+        ending_y = indexes["ending_y"]
+
+        starting_x = indexes["starting_x"] 
+        ending_x = indexes["ending_x"]
+
+        sub_raster = self.get_zoomed_raster(self.raster, zoom_level)
+        sub_raster = self.get_subset_of_nodes(sub_raster, starting_y, ending_y, starting_x, ending_x)
         return sub_raster
     
-    def get_subset_of_nodes(self, starting_y, ending_y, starting_x, ending_x):
-        subset = self.raster[starting_y:ending_y, starting_x:ending_x]
+    def get_subset_of_nodes(self, raster,starting_y, ending_y, starting_x, ending_x):
+        subset = raster[starting_y:ending_y, starting_x:ending_x]
         return subset
     
     def get_zoomed_raster(self, raster, zoom_level):
-        if zoom_level == 0:
+        if zoom_level == 5:
             return raster
         
-        if zoom_level == 1:
-            return raster[::2]
-        
-        if zoom_level == 2:
-            return raster[::4]
+        if zoom_level == 4:
+            return raster[::2,::2]
         
         if zoom_level == 3:
-            return raster[::12]
+            return raster[::4,::4]
         
-        if zoom_level == 4:
-            return raster[::60]
+        if zoom_level == 2:
+            return raster[::10,::10]
+        
+        if zoom_level == 1:
+            return raster[::20,::20]
 
 
 @lru_cache

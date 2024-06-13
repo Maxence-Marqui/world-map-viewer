@@ -2,3 +2,4 @@ maps
 __pycache__
 .env
 test.txt
+test_raster.sql

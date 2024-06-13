@@ -4,11 +4,16 @@ import pygame
 from pygame.locals import *
 from functools import lru_cache, wraps
 
+from db_helpers import get_multiple_rasters
+
 from pygame_config import *
 from area import Area
+from chunk_dispacher import ChunkDispacher
 import numpy as np
 
 from time import time
+from math import floor
+
 
 def timing(f):
     @wraps(f)
@@ -25,16 +30,21 @@ def timing(f):
 class WorldMap():
     def __init__(self, map_center: int) -> None:
         self.running: bool = True
-        self.zoom_level: int = 0
+        self.zoom_level: int = 3
 
         self.screen_size: Tuple[int, int] = SIZE
         self.areas: Dict[Tuple[int,int], Area] = {}
-        self.displayed_map = np.random.rand(200, 300)
+        self.displayed_map = np.ones(MAP_DIMENSIONS)
 
         self.map_center = self.get_raster_position(map_center)
         self.vertical_offset = 0
         self.horizontal_offset = 0
         self.color_set = set()
+        self.displacement = 5
+
+        self.render_type = FULL_RERENDER
+        self.draw_golden_center = False
+        self.silent_mode = False
 
         self.create_areas()
         self.start_pygame_loop()
@@ -74,9 +84,10 @@ class WorldMap():
     
             to_update = self.handle_screen_rendering(screen)
             CLOCK.tick(60)
-            pygame.display.flip()
-            #pygame.display.update(to_update) 
 
+            if self.render_type == FULL_RERENDER: pygame.display.flip()
+            if self.render_type == PARTIAL_RERENDER: pygame.display.update(to_update) 
+        
     def handle_click(self):
         pass
 
@@ -91,49 +102,47 @@ class WorldMap():
             self.running = False
         
         if key[K_PLUS] or key[K_KP_PLUS]:
-            if self.zoom_level == 0:
-                self.zoom_level = 1
+            if self.zoom_level != 5:
+                self.zoom_level += 1
+                self.horizontal_offset = 0
+                self.vertical_offset = 0
         
         if key[K_MINUS] or key[K_KP_MINUS]:
-            if self.zoom_level == 1:
-                self.zoom_level = 0
+            if self.zoom_level != 1:
+                self.zoom_level -= 1
+                self.horizontal_offset = 0
+                self.vertical_offset = 0
     
-        if key[K_UP]:
-            self.vertical_offset -= 5
-            if self.vertical_offset < -100:
-                self.vertical_offset = 95
-                self.map_center = (self.map_center[0] - 1, self.map_center[1])
-            
+        if key[K_UP]: self.handle_movements("up")
+        if key[K_DOWN]: self.handle_movements("down")
+        if key[K_LEFT]: self.handle_movements("left")
+        if key[K_RIGHT]: self.handle_movements("right")
 
-        if key[K_DOWN]:
-            self.vertical_offset += 5
-            if self.vertical_offset > 100:
-                self.vertical_offset = -95
-                self.map_center = (self.map_center[0] + 1, self.map_center[1])
-            
-            
-        if key[K_LEFT]:
-            self.horizontal_offset -= 5
-            if self.horizontal_offset < -150:
-                self.horizontal_offset = 145
-                self.map_center = (self.map_center[0], self.map_center[1] - 1)
-            
-                
-        if key[K_RIGHT]:
-            self.horizontal_offset += 5
-            if self.horizontal_offset > 150:
-                self.horizontal_offset = -145
-                self.map_center = (self.map_center[0], self.map_center[1] + 1)
+        if key[K_TAB]: self.render_type = FULL_RERENDER if self.render_type == PARTIAL_RERENDER else PARTIAL_RERENDER
+        if key[K_g]: self.draw_golden_center = not self.draw_golden_center
+        if key[K_s]: self.silent_mode = not self.silent_mode
 
-        print(self.zoom_level)
-        
         self.create_areas()
 
     def create_areas(self):
-        positions = self.get_area_near_center()
+        positions = self.get_new_area_near_center()
+        rids_to_load = []
         for position in positions:
             if position in self.areas: continue
-            self.areas[position] = Area(self.get_rid(position), position)
+            rid = self.get_rid(position)
+            if rid > 0: rids_to_load.append(rid)
+        
+        if not len(rids_to_load): return
+        print(f"Loading {len(rids_to_load)} areas...")
+        areas = get_multiple_rasters(rids_to_load)
+        if not areas: 
+            print(rids_to_load)
+            return
+        print(f"Loading finished.")
+
+        for area in areas:
+            position = self.get_raster_position(area[0])
+            self.areas[position] = Area(area[0], position, area[1])
     
     @lru_cache
     def get_raster_position(self, rid):
@@ -148,353 +157,241 @@ class WorldMap():
 
     def handle_screen_rendering(self, screen):
 
-        #area_to_check = self.get_areas_to_check()
-        area_to_check = self.get_array_and_camera()
-        #original_map = self.displayed_map.copy()
-        #print("original map", original_map.shape)
+        if self.draw_golden_center: 
+            nodes_positions = None
 
-        for area in area_to_check:
-            indexes = area["indexes"]
-            camera = area["camera"]
-            sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)
-            #print(area["position"], "[{}:{} , {}:{}]".format(camera["starting_y"], camera["ending_y"], camera["starting_x"], camera["ending_x"]))
-            #print(sub_map.shape)
-            #print(area["position"])
-            self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
+        if self.render_type == FULL_RERENDER:
+            area_to_check = self.get_array_and_camera()
+            for area in area_to_check:
+                indexes = area["indexes"]
+                camera = area["camera"]
 
-        #map_differences = self.find_changed_indices(original_map, self.displayed_map)
-        rectangles_to_update = []
+                if self.draw_golden_center:
+                    if area["position"] == self.map_center: 
+                        nodes_positions = camera
 
-        #for difference in map_differences:
-        for y, row in enumerate(self.displayed_map):
-            for x, column in enumerate(row):
-                dimensions = (x * NODE_SIZE, y * NODE_SIZE, NODE_SIZE, NODE_SIZE)
-                #dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
-                #current_node = self.displayed_map[difference[0]][difference[1]]
-                current_node = column
+                sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)                
+                self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
+
+            
+            for y, row in enumerate(self.displayed_map):
+                for x, column in enumerate(row):
+                    dimensions = (x * NODE_SIZE, y * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                    current_node = column
+                    if current_node == 0: color = BLUE
+                    else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+
+                    if self.draw_golden_center:
+                        if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                            color = GOLD
+
+                    self.color_set.add(color)
+                    pygame.draw.rect(screen, color, dimensions, 0)
+        
+            return
+        
+        if self.render_type == PARTIAL_RERENDER:
+            area_to_check = self.get_array_and_camera()
+            original_map = self.displayed_map.copy()
+            for area in area_to_check:
+                indexes = area["indexes"]
+                camera = area["camera"]
+                sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)
+                self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
+
+                if self.draw_golden_center:
+                    if area["position"] == self.map_center: nodes_positions = camera
+
+            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            rectangles_to_update = []
+
+            for difference in map_differences:
+                dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                current_node = self.displayed_map[difference[0]][difference[1]]
+
                 if current_node == 0: color = BLUE
                 else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+
+                if self.draw_golden_center:
+                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                        color = GOLD
+
                 self.color_set.add(color)
-                #color = WHITE
-                pygame.draw.rect(screen, color, dimensions, 0)
-                #rectangles_to_update.append()
+                
+                rectangles_to_update.append(pygame.draw.rect(screen, color, dimensions, 0))
         
-        return #rectangles_to_update
+            return rectangles_to_update
 
-    def get_areas_to_check(self):
-        # Calculer les positions de départ dans la grille de chunks
-
-        area_near_center = self.get_area_near_center()
-
-        if self.zoom_level == 0:
-            max_width = 300
-            max_height = 200
-
-        if self.zoom_level == 1:
-            max_width = 150
-            max_height = 100
-        
-        if self.zoom_level == 2:
-            max_width = 75
-            max_height = 50
-        
-        if self.zoom_level == 3:
-            max_width = 60
-            max_height = 40
-        
-        if self.zoom_level == 4:
-            max_width = 30
-            max_height = 20
-
-        if self.horizontal_offset == 0 and self.vertical_offset == 0:
-            if self.zoom_level == 0: return [{"position": self.map_center, 
-                                              "indexes": {"starting_y": 0, "ending_y": 200, "starting_x": 0, "ending_x": 300},
-                                              "camera": {"starting_y": 0, "ending_y": 200, "starting_x": 0, "ending_x": 300}}]
-
-            #if self.zoom_level == 1: return [{"position": self.map_center, 
-            #                                  "indexes":{"starting_y": 0, "ending_y": 100, "starting_x": 0, "ending_x": 150},
-            #                                  "indexes":{"starting_y": 0, "ending_y": 100, "starting_x": 0, "ending_x": 150}}, 
-            #                               {"position": (self.map_center[0], self.map_center[1] + 1), "starting_y": 0, "ending_y": 100, "starting_x": 150, "ending_x": 300},
-            #                               {"position": (self.map_center[0] + 1, self.map_center[1]), "starting_y": 100, "ending_y": 200, "starting_x": 0, "ending_x": 150},
-            #                               {"position": (self.map_center[0] + 1, self.map_center[1] + 1), "starting_y": 100, "ending_y": 200, "starting_x": 150, "ending_x": 300}]
-            
-        if self.horizontal_offset < 0 and self.vertical_offset < 0:
-            if self.zoom_level == 0:
-                vertical_offset = abs(self.vertical_offset)
-                horizontal_offset = abs(self.horizontal_offset)
-                return [{"position": ((self.map_center[0] - 1, self.map_center[1] - 1)),
-                         "indexes":{"starting_y": 200 - vertical_offset, "ending_y": 200, "starting_x": 300 - horizontal_offset, "ending_x": 300},
-                         "camera":{"starting_y": 0, "ending_y": vertical_offset, "starting_x": 0, "ending_x": horizontal_offset}},
-
-                        {"position": ((self.map_center[0] - 1, self.map_center[1])),
-                         "indexes":{"starting_y": 200 - vertical_offset, "ending_y": 200 , "starting_x": 0, "ending_x": horizontal_offset},
-                         "camera":{"starting_y": 0, "ending_y": vertical_offset, "starting_x": 300 - horizontal_offset, "ending_x": 300}},
-
-                        {"position": ((self.map_center[0], self.map_center[1] - 1)),
-                         "indexes":{"starting_y": 0, "ending_y": 200 - vertical_offset, "starting_x": 300 - horizontal_offset, "ending_x": 300},
-                         "camera":{"starting_y": vertical_offset, "ending_y": 200, "starting_x": 0, "ending_x": horizontal_offset}}, 
-
-                        {"position": (self.map_center),
-                         "indexes":{"starting_y": 0, "ending_y": 200 - vertical_offset, "starting_x": 0, "ending_x": 300 - horizontal_offset},
-                         "camera":{"starting_y": vertical_offset, "ending_y": 200, "starting_x": horizontal_offset, "ending_x": 300}}]
-        
-        if self.horizontal_offset > 0 and self.vertical_offset < 0:
-            if self.zoom_level == 0:
-                pass
-        
-        if self.horizontal_offset < 0 and self.vertical_offset > 0:
-            if self.zoom_level == 0:
-                pass
-        
-        if self.horizontal_offset < 0 and self.vertical_offset < 0:
-            if self.zoom_level == 0:
-                pass
-            
-
-        if self.horizontal_offset > 0:
-            if self.zoom_level == 0:
-                return [{"position": self.map_center,
-                         "indexes":{"starting_y": 0, "ending_y": 200, "starting_x": self.horizontal_offset, "ending_x": 300},
-                          "camera":{"starting_y": 0, "ending_y": 200, "starting_x": 0, "ending_x": 300 - self.horizontal_offset} }, 
-                        {"position": (self.map_center[0], self.map_center[1] + 1),
-                         "indexes":{"starting_y": 0, "ending_y": 200, "starting_x": 0, "ending_x": self.horizontal_offset},
-                         "camera": {"starting_y": 0, "ending_y": 200, "starting_x": 300 - self.horizontal_offset, "ending_x": 300}}]
-
-        if self.horizontal_offset < 0:
-            horizontal_offset = abs(self.horizontal_offset)
-            if self.zoom_level == 0:
-                return [{"position": (self.map_center),
-                         "indexes":{"starting_y": 0, "ending_y": 200, "starting_x": 0, "ending_x": 300 - horizontal_offset},
-                          "camera":{"starting_y": 0, "ending_y": 200, "starting_x": horizontal_offset, "ending_x": 300} }, 
-                        {"position": (self.map_center[0], self.map_center[1] - 1),
-                         "indexes":{"starting_y": 0, "ending_y": 200, "starting_x": 300 - horizontal_offset, "ending_x": 300},
-                         "camera": {"starting_y": 0, "ending_y": 200, "starting_x": 0, "ending_x": horizontal_offset}}]
-
-        if self.vertical_offset > 0:
-            if self.zoom_level == 0:
-                return [{"position": self.map_center,
-                         "indexes":{"starting_y": self.vertical_offset, "ending_y": 200, "starting_x": 0, "ending_x": 300},
-                          "camera":{"starting_y": 0, "ending_y": 200 - self.vertical_offset, "starting_x": 0, "ending_x": 300} }, 
-                        {"position": (self.map_center[0] + 1, self.map_center[1]),
-                         "indexes":{"starting_y": 0, "ending_y": self.vertical_offset, "starting_x": 0, "ending_x": 300},
-                         "camera": {"starting_y": 200 - self.vertical_offset, "ending_y": 200, "starting_x": 0, "ending_x": 300}}]
-
-        if self.vertical_offset < 0:
-            vertical_offset = abs(self.vertical_offset)
-            if self.zoom_level == 0:
-                return [{"position": (self.map_center),
-                         "indexes":{"starting_y": 0, "ending_y": 200 - vertical_offset, "starting_x": 0, "ending_x": 300},
-                          "camera":{"starting_y": vertical_offset, "ending_y": 200, "starting_x": 0, "ending_x": 300} }, 
-                        {"position": (self.map_center[0] - 1, self.map_center[1]),
-                         "indexes":{"starting_y": 200 - vertical_offset, "ending_y": 200, "starting_x": 0, "ending_x": 300},
-                         "camera": {"starting_y": 0, "ending_y": vertical_offset, "starting_x": 0, "ending_x": 300}}]
-    
     def find_changed_indices(self, original_array, modified_array):
     # Trouver les indices où les valeurs sont différentes
         changed_indices = np.argwhere(original_array != modified_array)
         return changed_indices
 
-    def get_area_near_center(self):
+    def get_new_area_near_center(self):
         positions = []
 
-        if self.zoom_level == 0: starting_point, ending_point =  -1, 2
-        if self.zoom_level == 1: starting_point, ending_point =  -2, 3
-        #if self.zoom_level == 2: starting_point, ending_point =  -1, 2
-        #if self.zoom_level == 3: starting_point, ending_point =  -2, 3
+        if self.zoom_level == 5: starting_point, ending_point =  -1, 2
+        if self.zoom_level == 4: starting_point, ending_point =  -2, 3
+        if self.zoom_level == 3: starting_point, ending_point =  -3, 4
+        if self.zoom_level == 2: starting_point, ending_point =  -6, 7
+        if self.zoom_level == 1: starting_point, ending_point =  -11, 12
 
-        for i in range(-1,2):
-            for j in range(-1,2):
-                positions.append((self.map_center[0] + i, self.map_center[1] + j))
+        for i in range(starting_point,ending_point):
+            for j in range(starting_point,ending_point):
+                new_pos = (self.map_center[0] + i, self.map_center[1] + j)
+                if not new_pos in self.areas: positions.append(new_pos)
 
         return positions
         
     def get_array_and_camera(self):
 
-        vertical_offset = abs(self.vertical_offset)
-        horizontal_offset = abs(self.horizontal_offset)
-
         areas = []
 
-        chunks_count, height_range_start, width_range_start = self.get_chunks_and_informations()
+        chunks_infos = self.get_chunks_and_informations()
 
-        print("----------------------------------")
+        #print("----------------------------------")
+        #print("map_center", self.map_center)
+        #print("offsets",(self.vertical_offset, self.horizontal_offset))
+        #print(chunks_infos)
+        
+        chunks_count = chunks_infos["chunks_count"]
+        height_range_start = chunks_infos["height_range_start"]
+        width_range_start = chunks_infos["width_range_start"]
+        base_camera_height = chunks_infos["base_camera_height"]
+        base_camera_width = chunks_infos["base_camera_width"]
 
+        chunk_dispatcher = ChunkDispacher(base_camera_height, base_camera_width, self.horizontal_offset, self.vertical_offset)
 
-        for y in range(height_range_start, height_range_start + chunks_count[0]):
-            remaining_height_camera, remaining_width_camera = self.displayed_map.shape
-            remaining_height_map, remaining_width_map = self.displayed_map.shape
-
-            for x in range(width_range_start, width_range_start + chunks_count[1]):
-                if y == height_range_start:
-                    print("start_y")
-                    camera_starting_height = 0
-                    camera_ending_height = vertical_offset if self.vertical_offset < 0 else self.displayed_map.shape[0] - vertical_offset
-                    remaining_height_camera -= vertical_offset
-
-                    starting_y = self.displayed_map.shape[0] - vertical_offset if self.vertical_offset < 0 else vertical_offset
-                    ending_y = self.displayed_map.shape[0]
-                    remaining_height_map -= vertical_offset
+        for vertical_modifier in range(height_range_start, height_range_start + chunks_count[0]):
+            if vertical_modifier == height_range_start:
+                camera_starting_height, camera_ending_height, starting_y, ending_y = chunk_dispatcher.get_start_y()
                 
-                elif y == (height_range_start + chunks_count[0] - 1):
-                    print("end_y")
-                    camera_starting_height = vertical_offset if self.vertical_offset < 0 else self.displayed_map.shape[0] - vertical_offset
-                    camera_ending_height = self.displayed_map.shape[0]
+            elif vertical_modifier == (height_range_start + chunks_count[0] - 1):
+                camera_starting_height, camera_ending_height, starting_y, ending_y = chunk_dispatcher.get_ending_y()
 
-                    starting_y = 0
-                    ending_y = self.displayed_map.shape[0] - vertical_offset if self.vertical_offset < 0 else vertical_offset
+            else:
+                camera_starting_height, camera_ending_height, starting_y, ending_y = chunk_dispatcher.get_middle_y()
+
+            for horizontal_modifier in range(width_range_start, width_range_start + chunks_count[1]):
+            
+                if horizontal_modifier == width_range_start:
+                    camera_starting_width, camera_ending_width, starting_x, ending_x = chunk_dispatcher.get_start_x()
+                
+                elif horizontal_modifier == (width_range_start + chunks_count[1] - 1):
+                   camera_starting_width, camera_ending_width, starting_x, ending_x = chunk_dispatcher.get_ending_x()
 
                 else:
-                    print("middle_y")
-                    camera_starting_height = remaining_height_camera
-                    camera_ending_height = remaining_height_camera - int(self.displayed_map.shape[0] / chunks_count[0])
-                    remaining_height_camera -= int(self.displayed_map.shape[0] / chunks_count[0])
+                    camera_starting_width, camera_ending_width, starting_x, ending_x = chunk_dispatcher.get_middle_x()
+                    
 
-                    starting_y = remaining_height_map
-                    ending_y = remaining_height_map - int(self.displayed_map.shape[0] / chunks_count[0])
-                    remaining_height_map -= int(self.displayed_map.shape[0] / chunks_count[0])
+                camera = {"starting_y":  int(camera_starting_height), 
+                           "ending_y": int(camera_ending_height), 
+                           "starting_x": int(camera_starting_width), 
+                           "ending_x": int(camera_ending_width)}
 
-                if x == width_range_start:
-                    print("start_x")
-                    camera_starting_width = 0
-                    camera_ending_width = horizontal_offset if self.horizontal_offset < 0  else self.displayed_map.shape[1] - horizontal_offset
-                    remaining_width_camera -= horizontal_offset
-
-                    starting_x = self.displayed_map.shape[1] - horizontal_offset if self.horizontal_offset < 0 else horizontal_offset
-                    ending_x = self.displayed_map.shape[1]
-                    remaining_width_map -= horizontal_offset
+                indexes = {"starting_y": int(starting_y) , 
+                           "ending_y": int(ending_y) , 
+                           "starting_x": int(starting_x), 
+                           "ending_x": int(ending_x)}
                 
-                elif x == (width_range_start + chunks_count[1] - 1):
-                    print("end_x")
-                    camera_starting_width = horizontal_offset if self.horizontal_offset < 0 else remaining_width_map
-                    camera_ending_width = self.displayed_map.shape[1]
-
-                    starting_x = 0
-                    ending_x = self.displayed_map.shape[1] - horizontal_offset if self.horizontal_offset < 0 else self.displayed_map.shape[1] - remaining_width_map
-
-                else:
-                    print("middle_x")
-                    camera_starting_width = remaining_width_camera
-                    camera_ending_width = remaining_width_camera - int(self.displayed_map.shape[1] / chunks_count[1])
-                    remaining_width_camera -= int(self.displayed_map.shape[1] / chunks_count[1])
-
-                    starting_x = remaining_width_camera
-                    ending_x = remaining_width_camera - int(self.displayed_map.shape[1] / chunks_count[1])
-                    remaining_width_camera -= int(self.displayed_map.shape[1] / chunks_count[1])
-
-                camera = {"starting_y":  camera_starting_height, 
-                           "ending_y": camera_ending_height, 
-                           "starting_x": camera_starting_width, 
-                           "ending_x": camera_ending_width}
-
-                indexes = {"starting_y": starting_y , 
-                           "ending_y": ending_y , 
-                           "starting_x": starting_x, 
-                           "ending_x": ending_x}
+                #print((self.map_center[0] + vertical_modifier, self.map_center[1] + horizontal_modifier))
+                #print("camera", camera)
+                #print("index", indexes)
                 
-                print((self.map_center[0] + y, self.map_center[1] + x))
-                print(camera)
-                print(indexes)
-                
-                area = {"position": (self.map_center[0] + y, self.map_center[1] + x),
+                area = {"position": (self.map_center[0] + vertical_modifier, self.map_center[1] + horizontal_modifier),
                         "indexes": indexes, 
                         "camera": camera}
                 
-                areas.append(area)
-                
+                areas.append(area)    
         
         return areas
     
     def get_chunks_and_informations(self):
-        if self.zoom_level == 0:
-            if self.horizontal_offset == 0 and self.vertical_offset == 0:
-                chunks_count = (1,1)
-                height_range_start = 0
-                width_range_start = 0
-                return chunks_count, height_range_start, width_range_start
+        chunks_informations = {}
 
-            if self.horizontal_offset > 0 and self.vertical_offset > 0:
-                chunks_count = (2,2)
-                height_range_start = 0
-                width_range_start = 0
-                return chunks_count, height_range_start, width_range_start
-            
-            if self.horizontal_offset < 0 and self.vertical_offset < 0:
-                chunks_count = (2,2)
-                height_range_start = -1
-                width_range_start = -1
-                return chunks_count, height_range_start, width_range_start
-            
-            if self.horizontal_offset < 0 and self.vertical_offset > 0:
-                chunks_count = (2,2)
-                height_range_start = 0
-                width_range_start = -1
-                return chunks_count, height_range_start, width_range_start
-            
-            if self.horizontal_offset > 0 and self.vertical_offset < 0:
-                chunks_count = (2,2)
-                height_range_start = -1
-                width_range_start = 0
-                return chunks_count, height_range_start, width_range_start
+        if self.zoom_level == 5: zoom_modificator = 1
+        if self.zoom_level == 4: zoom_modificator = 2
+        if self.zoom_level == 3: zoom_modificator = 4
+        if self.zoom_level == 2: zoom_modificator = 10
+        if self.zoom_level == 1: zoom_modificator = 20
 
-            
-            if self.horizontal_offset > 0:
-                chunks_count = (1,2)
-                height_range_start = 0
-                width_range_start = 0
-                return chunks_count, height_range_start, width_range_start
-            
-            if self.horizontal_offset < 0:
-                chunks_count = (1,2)
-                height_range_start = 0
-                width_range_start = -1
-                return chunks_count, height_range_start, width_range_start
+        chunks_informations["base_camera_height"] = self.displayed_map.shape[0] / zoom_modificator
+        chunks_informations["base_camera_width"] = self.displayed_map.shape[1] / zoom_modificator
 
-            if self.vertical_offset > 0:
-                chunks_count = (2,1)
-                height_range_start = 0
-                width_range_start = 0
-                return chunks_count, height_range_start, width_range_start
-            
-            if self.vertical_offset < 0:
-                chunks_count = (2,1)
-                height_range_start = -1
-                width_range_start = 0
-                return chunks_count, height_range_start, width_range_start
-        
-        if self.zoom_level == 1:
-            if self.horizontal_offset == 0 and self.vertical_offset == 0:
-                height_range_start = 0
-                width_range_start = 0
-                chunks_count = (2,2)
-                return chunks_count, height_range_start, width_range_start
-        
-        if self.zoom_level == 2:
-            if self.horizontal_offset == 0 and self.vertical_offset == 0:
-                chunks_count = (4,4)
-                return chunks_count, height_range_start, width_range_start
-        
-        if self.zoom_level == 3:
-            if self.horizontal_offset == 0 and self.vertical_offset == 0:
-                chunks_count = (10,10)
-                return chunks_count, height_range_start, width_range_start
-        
-        if self.zoom_level == 4:
-            if self.horizontal_offset == 0 and self.vertical_offset == 0:
-                chunks_count = (20,20)
-                return chunks_count, height_range_start, width_range_start
+        chunks_y_count = zoom_modificator
+        chunks_x_count = zoom_modificator
 
+        if abs(self.vertical_offset): chunks_y_count += 1
+        if abs(self.horizontal_offset): chunks_x_count += 1
 
+        height_range_start = STARTING_INDEXES[self.zoom_level][0]
+        width_range_start = STARTING_INDEXES[self.zoom_level][1]
+
+        if self.vertical_offset < 0: height_range_start -= 1
+        if self.horizontal_offset < 0: width_range_start -= 1
+
+        chunks_informations["chunks_count"] = (chunks_y_count, chunks_x_count)
+
+        chunks_informations["height_range_start"] = height_range_start
+        chunks_informations["width_range_start"] = width_range_start
+
+        return chunks_informations
+
+    def handle_movements(self, direction):
 
         
+        vertical_threshold = MAP_DIMENSIONS[0] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
+        horizontal_threshold = MAP_DIMENSIONS[1] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
+
+        if direction == "up":
+            diff_until_change = abs(vertical_threshold - abs(self.vertical_offset))
+            above_threshold = self.displacement - diff_until_change
+            if above_threshold >= 0 and self.vertical_offset < 0:
+                self.vertical_offset = vertical_threshold + above_threshold
+                self.map_center = (self.map_center[0] - 1, self.map_center[1])
+            else:
+                self.vertical_offset -= self.displacement
+
+        if direction == "down":
+            diff_until_change = abs(vertical_threshold - abs(self.vertical_offset))
+            above_threshold = self.displacement - diff_until_change
+            if above_threshold >= 0 and self.vertical_offset > 0:
+                self.vertical_offset = -(vertical_threshold - above_threshold)
+                self.map_center = (self.map_center[0] + 1, self.map_center[1])
+            else:
+                self.vertical_offset += self.displacement
+
+        if direction == "left":
+            diff_until_change = abs(horizontal_threshold - abs(self.horizontal_offset))
+            above_threshold = self.displacement - diff_until_change
+            if above_threshold >= 0 and self.horizontal_offset < 0:
+                self.horizontal_offset = horizontal_threshold + above_threshold
+                self.map_center = (self.map_center[0], self.map_center[1] - 1)
+            else:
+                self.horizontal_offset -= self.displacement
+
+        if direction == "right":
+            diff_until_change = abs(horizontal_threshold - abs(self.horizontal_offset))
+            above_threshold = self.displacement - diff_until_change
+            if above_threshold >= 0 and self.horizontal_offset > 0:
+                self.horizontal_offset = -(horizontal_threshold - above_threshold)
+                self.map_center = (self.map_center[0], self.map_center[1] + 1)
+            else:
+                self.horizontal_offset += self.displacement
+
+        print("--------------------------")
+        #print("until change", diff_until_change)
+        #print("above threshold", above_threshold)
         
-        
-    
 
-
-
+        print(self.map_center, (self.vertical_offset, self.horizontal_offset))
 
 
 
 @lru_cache
 def interpolate(color_a, color_b, t):
     return tuple(int(a + (b - a) * t) for a, b in zip(color_a, color_b))
+
+def round_to_nearest_x(x, base_value):
+    return x * round(base_value / x)
+
