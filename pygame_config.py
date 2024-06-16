@@ -46,3 +46,5 @@ NODE_SIZE = 4
 
 FULL_RERENDER = "full"
 PARTIAL_RERENDER  = "partial"
+HYBRID_RERENDER = "hybrid"
+
