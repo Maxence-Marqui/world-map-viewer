@@ -9,8 +9,8 @@ from db_helpers import get_multiple_rasters
 from pygame_config import *
 from area import Area
 from chunk_dispacher import ChunkDispacher
-import numpy as np
 
+import numpy as np
 from time import time
 from math import floor
 
@@ -28,15 +28,15 @@ def timing(f):
 
 
 class WorldMap():
-    def __init__(self, map_center: int) -> None:
+    def __init__(self, map_center: tuple[int, int]) -> None:
         self.running: bool = True
-        self.zoom_level: int = 3
+        self.zoom_level: int = 5
 
         self.screen_size: Tuple[int, int] = SIZE
         self.areas: Dict[Tuple[int,int], Area] = {}
         self.displayed_map = np.ones(MAP_DIMENSIONS)
 
-        self.map_center = self.get_raster_position(map_center)
+        self.map_center = map_center
         self.vertical_offset = 0
         self.horizontal_offset = 0
         self.color_set = set()
@@ -85,6 +85,7 @@ class WorldMap():
             to_update = self.handle_screen_rendering(screen)
             CLOCK.tick(60)
 
+            if self.render_type == HYBRID_RERENDER: pygame.display.update()
             if self.render_type == FULL_RERENDER: pygame.display.flip()
             if self.render_type == PARTIAL_RERENDER: pygame.display.update(to_update) 
         
@@ -118,40 +119,49 @@ class WorldMap():
         if key[K_LEFT]: self.handle_movements("left")
         if key[K_RIGHT]: self.handle_movements("right")
 
-        if key[K_TAB]: self.render_type = FULL_RERENDER if self.render_type == PARTIAL_RERENDER else PARTIAL_RERENDER
+        if key[K_TAB]: self.switch_render_mode()
         if key[K_g]: self.draw_golden_center = not self.draw_golden_center
         if key[K_s]: self.silent_mode = not self.silent_mode
 
         self.create_areas()
+    
+    def switch_render_mode(self):
+        if self.render_type == FULL_RERENDER: self.render_type = PARTIAL_RERENDER
+        elif self.render_type == PARTIAL_RERENDER: self.render_type = HYBRID_RERENDER
+        elif self.render_type == HYBRID_RERENDER: self.render_type = FULL_RERENDER
 
     def create_areas(self):
         positions = self.get_new_area_near_center()
-        rids_to_load = []
+        rids_to_load = {}
+
         for position in positions:
             if position in self.areas: continue
-            rid = self.get_rid(position)
-            if rid > 0: rids_to_load.append(rid)
+            table, rid = self.get_raster_locations(position)
+            if rid > 0:
+                if table in rids_to_load: rids_to_load[table].append(rid)
+                else: rids_to_load[table] = [rid]
         
         if not len(rids_to_load): return
-        print(f"Loading {len(rids_to_load)} areas...")
-        areas = get_multiple_rasters(rids_to_load)
-        if not areas: 
-            print(rids_to_load)
-            return
-        print(f"Loading finished.")
 
-        for area in areas:
-            position = self.get_raster_position(area[0])
-            self.areas[position] = Area(area[0], position, area[1])
+        for table in rids_to_load:
+            print(f"Loading {len(rids_to_load[table])} areas...")
+            table_name = format_table_name(table[0], table[1])
+            areas = get_multiple_rasters(table_name, rids_to_load[table])
+            for area in areas:
+                position = self.get_raster_position(area[0], table)
+                self.areas[position] = Area(area[0], position, area[1])
+            
+            print(f"Finished loading {len(rids_to_load[table])} areas...")
+
     
-    @lru_cache
-    def get_raster_position(self, rid):
+    @lru_cache(maxsize=None)
+    def get_raster_position(self, rid, table: Tuple[int, int]):
         rid -= 1
-        horizontal_position = int(rid % 48)
-        vertical_position = int(rid / 48)
+        horizontal_position = int(rid % 48) + table[1] * 48
+        vertical_position = int(rid / 48) + table[0] * 48
         return (vertical_position, horizontal_position)
 
-    @lru_cache
+    @lru_cache(maxsize=None)
     def get_rid(self, position: Tuple[int,int]):
         return position[0] * 48 + position[1] + 1
 
@@ -222,6 +232,37 @@ class WorldMap():
         
             return rectangles_to_update
 
+        if self.render_type == HYBRID_RERENDER:
+            area_to_check = self.get_array_and_camera()
+            original_map = self.displayed_map.copy()
+            for area in area_to_check:
+                indexes = area["indexes"]
+                camera = area["camera"]
+                sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)
+                self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
+
+                if self.draw_golden_center:
+                    if area["position"] == self.map_center: nodes_positions = camera
+
+            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            for difference in map_differences:
+                dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                current_node = self.displayed_map[difference[0]][difference[1]]
+
+                if current_node == 0: color = BLUE
+                else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+
+                if self.draw_golden_center:
+                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                        color = GOLD
+
+                self.color_set.add(color)
+                
+                pygame.draw.rect(screen, color, dimensions, 0)
+
+            return
+            
+
     def find_changed_indices(self, original_array, modified_array):
     # Trouver les indices où les valeurs sont différentes
         changed_indices = np.argwhere(original_array != modified_array)
@@ -247,12 +288,7 @@ class WorldMap():
 
         areas = []
 
-        chunks_infos = self.get_chunks_and_informations()
-
-        #print("----------------------------------")
-        #print("map_center", self.map_center)
-        #print("offsets",(self.vertical_offset, self.horizontal_offset))
-        #print(chunks_infos)
+        chunks_infos = self.get_chunks_and_informations(self.zoom_level, self.vertical_offset, self.horizontal_offset)
         
         chunks_count = chunks_infos["chunks_count"]
         height_range_start = chunks_infos["height_range_start"]
@@ -294,10 +330,6 @@ class WorldMap():
                            "starting_x": int(starting_x), 
                            "ending_x": int(ending_x)}
                 
-                #print((self.map_center[0] + vertical_modifier, self.map_center[1] + horizontal_modifier))
-                #print("camera", camera)
-                #print("index", indexes)
-                
                 area = {"position": (self.map_center[0] + vertical_modifier, self.map_center[1] + horizontal_modifier),
                         "indexes": indexes, 
                         "camera": camera}
@@ -306,29 +338,24 @@ class WorldMap():
         
         return areas
     
-    def get_chunks_and_informations(self):
+    @lru_cache(maxsize=None)
+    def get_chunks_and_informations(self, zoom_level, vertical_offset, horizontal_offset):
         chunks_informations = {}
 
-        if self.zoom_level == 5: zoom_modificator = 1
-        if self.zoom_level == 4: zoom_modificator = 2
-        if self.zoom_level == 3: zoom_modificator = 4
-        if self.zoom_level == 2: zoom_modificator = 10
-        if self.zoom_level == 1: zoom_modificator = 20
+        chunks_informations["base_camera_height"] = MAP_DIMENSIONS[0] / ZOOM_LVL_MODIFICATOR[zoom_level]
+        chunks_informations["base_camera_width"] =  MAP_DIMENSIONS[1] / ZOOM_LVL_MODIFICATOR[zoom_level]
 
-        chunks_informations["base_camera_height"] = self.displayed_map.shape[0] / zoom_modificator
-        chunks_informations["base_camera_width"] = self.displayed_map.shape[1] / zoom_modificator
+        chunks_y_count = ZOOM_LVL_MODIFICATOR[zoom_level]
+        chunks_x_count = ZOOM_LVL_MODIFICATOR[zoom_level]
 
-        chunks_y_count = zoom_modificator
-        chunks_x_count = zoom_modificator
+        if abs(vertical_offset): chunks_y_count += 1
+        if abs(horizontal_offset): chunks_x_count += 1
 
-        if abs(self.vertical_offset): chunks_y_count += 1
-        if abs(self.horizontal_offset): chunks_x_count += 1
+        height_range_start = STARTING_INDEXES[zoom_level][0]
+        width_range_start = STARTING_INDEXES[zoom_level][1]
 
-        height_range_start = STARTING_INDEXES[self.zoom_level][0]
-        width_range_start = STARTING_INDEXES[self.zoom_level][1]
-
-        if self.vertical_offset < 0: height_range_start -= 1
-        if self.horizontal_offset < 0: width_range_start -= 1
+        if vertical_offset < 0: height_range_start -= 1
+        if horizontal_offset < 0: width_range_start -= 1
 
         chunks_informations["chunks_count"] = (chunks_y_count, chunks_x_count)
 
@@ -377,21 +404,34 @@ class WorldMap():
                 self.horizontal_offset = -(horizontal_threshold - above_threshold)
                 self.map_center = (self.map_center[0], self.map_center[1] + 1)
             else:
-                self.horizontal_offset += self.displacement
+                self.horizontal_offset += self.displacement        
 
-        print("--------------------------")
-        #print("until change", diff_until_change)
-        #print("above threshold", above_threshold)
+
+    def get_table_and_relative_position(self, position):
+        table_y = floor(position[0] / 48)
+        table_x = floor(position[1] / 48)
         
+        relative_y = position[0] - (table_y * 48)
+        relative_x = position[1] - (table_x * 48)
+        return (table_y, table_x), (relative_y, relative_x)
+    
+    def get_raster_locations(self, position):
+        table, relative_position = self.get_table_and_relative_position(position)
+        rid = self.get_rid(relative_position)
 
-        print(self.map_center, (self.vertical_offset, self.horizontal_offset))
+        return (table, rid)
 
 
 
-@lru_cache
+@lru_cache(maxsize=None)
 def interpolate(color_a, color_b, t):
     return tuple(int(a + (b - a) * t) for a, b in zip(color_a, color_b))
 
+@lru_cache(maxsize=None)
 def round_to_nearest_x(x, base_value):
     return x * round(base_value / x)
 
+def format_table_name(y, x):
+    y = f"{y:02}"
+    x = f"{x:02}"
+    return f"{y}_{x}"

@@ -32,9 +32,9 @@ def get_raster(rid):
     return area
 
 
-def get_multiple_rasters(rids):
+def get_multiple_rasters(table, rids):
     rids = tuple(rids)
-    request = """SELECT rid, ST_AsGDALRaster(rast, 'GTiff') FROM a_world_map WHERE rid IN %s"""
+    request = f"""SELECT rid, ST_AsGDALRaster(rast, 'GTiff') FROM "{table}" WHERE rid IN %s"""
 
     try:
         connection = connect_to_db()

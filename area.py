@@ -27,8 +27,6 @@ class Area:
         self.position = raster_position
         self.raster: np.ndarray = self.convert_binary_to_np(raster_binary)
         print(f"Loaded Raster {self.rid}: {self.position}")
-        #self.load_area()
-
 
     def load_area(self) -> bool:
         if self.raster: return
@@ -84,8 +82,3 @@ class Area:
         
         if zoom_level == 1:
             return raster[::20,::20]
-
-
-@lru_cache
-def interpolate(color_a, color_b, t):
-    return tuple(int(a + (b - a) * t) for a, b in zip(color_a, color_b))
