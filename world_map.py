@@ -13,6 +13,7 @@ from chunk_dispacher import ChunkDispacher
 import numpy as np
 from time import time
 from math import floor
+import concurrent.futures
 
 
 def timing(f):
@@ -142,16 +143,21 @@ class WorldMap():
                 else: rids_to_load[table] = [rid]
         
         if not len(rids_to_load): return
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            for table in rids_to_load:
+                executor.map(self.load_areas, [table], [rids_to_load[table]])
 
-        for table in rids_to_load:
-            print(f"Loading {len(rids_to_load[table])} areas...")
-            table_name = format_table_name(table[0], table[1])
-            areas = get_multiple_rasters(table_name, rids_to_load[table])
-            for area in areas:
-                position = self.get_raster_position(area[0], table)
-                self.areas[position] = Area(area[0], position, area[1])
+    def load_areas(self, table, rids):
+        table_name = format_table_name(table[0], table[1])
+        print(f"Loading {len(rids)} areas from table {table_name}...")
+        areas = get_multiple_rasters(table_name, rids)
+        for area in areas:
+            position = self.get_raster_position(area[0], table)
+            self.areas[position] = Area(area[0], position, area[1])
             
-            print(f"Finished loading {len(rids_to_load[table])} areas...")
+        print(f"Finished loading {len(rids)} areas...")
+        return
 
     
     @lru_cache(maxsize=None)
@@ -179,6 +185,8 @@ class WorldMap():
                 if self.draw_golden_center:
                     if area["position"] == self.map_center: 
                         nodes_positions = camera
+
+                if not area["position"] in self.areas: continue
 
                 sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)                
                 self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
@@ -287,7 +295,6 @@ class WorldMap():
     def get_array_and_camera(self):
 
         areas = []
-
         chunks_infos = self.get_chunks_and_informations(self.zoom_level, self.vertical_offset, self.horizontal_offset)
         
         chunks_count = chunks_infos["chunks_count"]
@@ -365,7 +372,6 @@ class WorldMap():
         return chunks_informations
 
     def handle_movements(self, direction):
-
         
         vertical_threshold = MAP_DIMENSIONS[0] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
         horizontal_threshold = MAP_DIMENSIONS[1] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
