@@ -13,6 +13,7 @@ from chunk_dispacher import ChunkDispacher
 import numpy as np
 from time import time
 from math import floor
+from skimage.measure import regionprops, label, find_contours
 
 
 def timing(f):
@@ -41,7 +42,9 @@ class WorldMap():
         self.horizontal_offset = 0
         self.color_set = set()
         self.displacement = 5
+        self.topographic_intervals = generate_intervals(1, 2000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
 
+        self.map_mode = TOPOGRAPHIC_MAP
         self.render_type = FULL_RERENDER
         self.draw_golden_center = False
         self.silent_mode = False
@@ -81,13 +84,15 @@ class WorldMap():
             if keys_pressed:
                     pressed = pygame.key.get_pressed()
                     self.handle_key_press(pressed)
-    
-            to_update = self.handle_screen_rendering(screen)
-            CLOCK.tick(60)
+
+            if self.map_mode == REGULAR_MAP: to_update = self.render_regular_map(screen)
+            if self.map_mode == TOPOGRAPHIC_MAP: to_update = self.render_topographical_map(screen)
 
             if self.render_type == HYBRID_RERENDER: pygame.display.update()
             if self.render_type == FULL_RERENDER: pygame.display.flip()
             if self.render_type == PARTIAL_RERENDER: pygame.display.update(to_update) 
+
+            CLOCK.tick(60)
         
     def handle_click(self):
         pass
@@ -107,12 +112,14 @@ class WorldMap():
                 self.zoom_level += 1
                 self.horizontal_offset = 0
                 self.vertical_offset = 0
+                self.topographic_intervals = generate_intervals(1, 2000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
         
         if key[K_MINUS] or key[K_KP_MINUS]:
             if self.zoom_level != 1:
                 self.zoom_level -= 1
                 self.horizontal_offset = 0
                 self.vertical_offset = 0
+                self.topographic_intervals = generate_intervals(1, 2000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
     
         if key[K_UP]: self.handle_movements("up")
         if key[K_DOWN]: self.handle_movements("down")
@@ -122,6 +129,7 @@ class WorldMap():
         if key[K_TAB]: self.switch_render_mode()
         if key[K_g]: self.draw_golden_center = not self.draw_golden_center
         if key[K_s]: self.silent_mode = not self.silent_mode
+        if key[K_m]: self.switch_map_mode()
 
         self.create_areas()
     
@@ -129,8 +137,15 @@ class WorldMap():
         if self.render_type == FULL_RERENDER: self.render_type = PARTIAL_RERENDER
         elif self.render_type == PARTIAL_RERENDER: self.render_type = HYBRID_RERENDER
         elif self.render_type == HYBRID_RERENDER: self.render_type = FULL_RERENDER
+    
+    def switch_map_mode(self):
+        if self.map_mode == REGULAR_MAP: self.map_mode = TOPOGRAPHIC_MAP
+        elif self.map_mode == TOPOGRAPHIC_MAP: self.map_mode = REGULAR_MAP
+
+        print(self.map_mode)
 
     def create_areas(self):
+
         positions = self.get_new_area_near_center()
         rids_to_load = {}
 
@@ -165,25 +180,23 @@ class WorldMap():
     def get_rid(self, position: Tuple[int,int]):
         return position[0] * 48 + position[1] + 1
 
-    def handle_screen_rendering(self, screen):
+    def render_regular_map(self, screen):
 
-        if self.draw_golden_center: 
-            nodes_positions = None
+        if self.draw_golden_center: nodes_positions = None
+        if self.render_type != FULL_RERENDER: original_map = self.displayed_map.copy()
+
+        area_to_check = self.get_array_and_camera()
+        for area in area_to_check:
+            indexes = area["indexes"]
+            camera = area["camera"]
+
+            if self.draw_golden_center and area["position"] == self.map_center: nodes_positions = camera
+
+            sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)                
+            self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
 
         if self.render_type == FULL_RERENDER:
-            area_to_check = self.get_array_and_camera()
-            for area in area_to_check:
-                indexes = area["indexes"]
-                camera = area["camera"]
 
-                if self.draw_golden_center:
-                    if area["position"] == self.map_center: 
-                        nodes_positions = camera
-
-                sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)                
-                self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
-
-            
             for y, row in enumerate(self.displayed_map):
                 for x, column in enumerate(row):
                     dimensions = (x * NODE_SIZE, y * NODE_SIZE, NODE_SIZE, NODE_SIZE)
@@ -198,8 +211,100 @@ class WorldMap():
                     self.color_set.add(color)
                     pygame.draw.rect(screen, color, dimensions, 0)
         
-            return
+        if self.render_type == PARTIAL_RERENDER:
+            
+            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            rectangles_to_update = []
+
+            for difference in map_differences:
+                dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                current_node = self.displayed_map[difference[0]][difference[1]]
+
+                if current_node == 0: color = BLUE
+                else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+
+                if self.draw_golden_center:
+                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                        color = GOLD
+
+                self.color_set.add(color)
+                
+                rectangles_to_update.append(pygame.draw.rect(screen, color, dimensions, 0))
         
+            return rectangles_to_update
+
+        if self.render_type == HYBRID_RERENDER:
+
+            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+
+            for difference in map_differences:
+                dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                current_node = self.displayed_map[difference[0]][difference[1]]
+
+                if current_node == 0: color = BLUE
+                else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+
+                if self.draw_golden_center:
+                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                        color = GOLD
+
+                self.color_set.add(color)
+                pygame.draw.rect(screen, color, dimensions, 0)
+    
+    def render_topographical_map(self, screen):
+
+        if self.draw_golden_center: nodes_positions = None
+        if self.render_type != FULL_RERENDER: original_map = self.displayed_map.copy()
+
+        area_to_check = self.get_array_and_camera()
+
+        for area in area_to_check:
+            indexes = area["indexes"]
+            camera = area["camera"]
+            sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)
+            self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
+
+            if self.draw_golden_center and area["position"] == self.map_center: nodes_positions = camera
+
+
+        if self.render_type == FULL_RERENDER:
+            
+            updated_map = (self.displayed_map == 0)
+
+            for y, row in enumerate(updated_map):
+                for x, column in enumerate(row):
+                    if not column: continue
+
+                    dimensions = (x * NODE_SIZE, y * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                    pygame.draw.rect(screen, BLUE, dimensions, 0)
+
+            for min, max ,color in self.topographic_intervals:
+                updated_map = (min <= self.displayed_map) & (self.displayed_map <= max)
+                labelled_map = label(updated_map, connectivity=2)
+
+                regions = regionprops(labelled_map)
+
+                for region in regions:
+                    for node in region.coords:
+                        dimensions = (node[1] * NODE_SIZE, node[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                        pygame.draw.rect(screen, color, dimensions, 0)
+                    
+                    #if abs(region.bbox[0] - region.bbox[2]) < 2 or abs(region.bbox[1] - region.bbox[3]) < 2: continue
+                    #dimensions = (int(region.centroid[1]) * NODE_SIZE, int(region.centroid[0]) * NODE_SIZE, NODE_SIZE, NODE_SIZE)
+                    #pygame.draw.rect(screen, RED, dimensions, 0)
+
+                    if abs(region.bbox[0] - region.bbox[2]) < 8 or abs(region.bbox[1] - region.bbox[3]) < 8: continue
+                    for contour in find_contours(region.image, fully_connected="low"):
+                        contour[:, 0] += region.bbox[0]
+                        contour[:, 1] += region.bbox[1]
+                        perimeter = []
+                        for node in contour:
+                            perimeter.append((node[1] * NODE_SIZE, node[0] * NODE_SIZE))
+                        pygame.draw.lines(screen, BLACK, False ,perimeter)
+
+
+                        
+
         if self.render_type == PARTIAL_RERENDER:
             area_to_check = self.get_array_and_camera()
             original_map = self.displayed_map.copy()
@@ -233,18 +338,10 @@ class WorldMap():
             return rectangles_to_update
 
         if self.render_type == HYBRID_RERENDER:
-            area_to_check = self.get_array_and_camera()
+
             original_map = self.displayed_map.copy()
-            for area in area_to_check:
-                indexes = area["indexes"]
-                camera = area["camera"]
-                sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)
-                self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
-
-                if self.draw_golden_center:
-                    if area["position"] == self.map_center: nodes_positions = camera
-
             map_differences = self.find_changed_indices(original_map, self.displayed_map)
+
             for difference in map_differences:
                 dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                 current_node = self.displayed_map[difference[0]][difference[1]]
@@ -256,12 +353,8 @@ class WorldMap():
                     if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
                         color = GOLD
 
-                self.color_set.add(color)
-                
                 pygame.draw.rect(screen, color, dimensions, 0)
 
-            return
-            
 
     def find_changed_indices(self, original_array, modified_array):
     # Trouver les indices où les valeurs sont différentes
@@ -435,3 +528,10 @@ def format_table_name(y, x):
     y = f"{y:02}"
     x = f"{x:02}"
     return f"{y}_{x}"
+
+def generate_intervals(start, end, step):
+    intervals = []
+    for i in range(start, end + step, step):
+        intervals.append((i, i + step - 1 ,interpolate(LIGHTEST_GREEN, DARKEST_GREEN, (i + step - 1) / end)))
+
+    return intervals
