@@ -40,6 +40,14 @@ STARTING_INDEXES = {
     1: (-9, -9)
 }
 
+TOPOGRAPHIC_THRESHOLDS = {
+    5: 200,
+    4: 250,
+    3: 300,
+    2: 350,
+    1: 400
+}
+
 MAP_DIMENSIONS = (200, 300)
 
 NODE_SIZE = 4
@@ -47,4 +55,7 @@ NODE_SIZE = 4
 FULL_RERENDER = "full"
 PARTIAL_RERENDER  = "partial"
 HYBRID_RERENDER = "hybrid"
+
+REGULAR_MAP = "regular"
+TOPOGRAPHIC_MAP = "topographic"
 
