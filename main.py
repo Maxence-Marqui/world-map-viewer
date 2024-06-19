@@ -9,6 +9,7 @@ if __name__ == "__main__":
     #profiler.enable()
     
     map = WorldMap((12+48,24))
+    map.start()
 
     #print(len(map.color_set))
     #s = io.StringIO()

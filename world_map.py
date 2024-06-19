@@ -2,30 +2,18 @@ from typing import Tuple, Dict, List
 
 import pygame
 from pygame.locals import *
-from functools import lru_cache, wraps
+from functools import lru_cache
 
-from db_helpers import get_multiple_rasters
+from helpers import *
 
 from pygame_config import *
 from area import Area
 from chunk_dispacher import ChunkDispacher
 
 import numpy as np
-from time import time
-from math import floor
 from skimage.measure import regionprops, label, find_contours
+import threading
 
-
-def timing(f):
-    @wraps(f)
-    def wrap(*args, **kw):
-        ts = time()
-        result = f(*args, **kw)
-        te = time()
-        print('func:%r args:[%r, %r] took: %2.4f sec' % \
-          (f.__name__, args, kw, te-ts))
-        return result
-    return wrap
 
 
 class WorldMap():
@@ -48,13 +36,11 @@ class WorldMap():
         self.render_type = FULL_RERENDER
         self.draw_golden_center = False
         self.silent_mode = False
-
+        
         self.create_areas()
-        self.start_pygame_loop()
-
         
 
-    def start_pygame_loop(self):
+    def start(self):
 
         pygame.init()
         CLOCK = pygame.time.Clock()
@@ -63,6 +49,7 @@ class WorldMap():
 
         while self.running:
 
+            CLOCK.tick(60)
             screen.fill(LIGHT_GREY)
 
             for event in pygame.event.get():
@@ -92,7 +79,6 @@ class WorldMap():
             if self.render_type == FULL_RERENDER: pygame.display.flip()
             if self.render_type == PARTIAL_RERENDER: pygame.display.update(to_update) 
 
-            CLOCK.tick(60)
         
     def handle_click(self):
         pass
@@ -112,14 +98,14 @@ class WorldMap():
                 self.zoom_level += 1
                 self.horizontal_offset = 0
                 self.vertical_offset = 0
-                self.topographic_intervals = generate_intervals(1, 2000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
+                self.topographic_intervals = generate_intervals(1, 5000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
         
         if key[K_MINUS] or key[K_KP_MINUS]:
             if self.zoom_level != 1:
                 self.zoom_level -= 1
                 self.horizontal_offset = 0
                 self.vertical_offset = 0
-                self.topographic_intervals = generate_intervals(1, 2000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
+                self.topographic_intervals = generate_intervals(1, 5000, TOPOGRAPHIC_THRESHOLDS[self.zoom_level])
     
         if key[K_UP]: self.handle_movements("up")
         if key[K_DOWN]: self.handle_movements("down")
@@ -131,8 +117,9 @@ class WorldMap():
         if key[K_s]: self.silent_mode = not self.silent_mode
         if key[K_m]: self.switch_map_mode()
 
+        
         self.create_areas()
-    
+
     def switch_render_mode(self):
         if self.render_type == FULL_RERENDER: self.render_type = PARTIAL_RERENDER
         elif self.render_type == PARTIAL_RERENDER: self.render_type = HYBRID_RERENDER
@@ -142,43 +129,24 @@ class WorldMap():
         if self.map_mode == REGULAR_MAP: self.map_mode = TOPOGRAPHIC_MAP
         elif self.map_mode == TOPOGRAPHIC_MAP: self.map_mode = REGULAR_MAP
 
-        print(self.map_mode)
-
     def create_areas(self):
-
         positions = self.get_new_area_near_center()
-        rids_to_load = {}
+        rids_to_load: Dict[Tuple[int, int], List[int]] = {}
 
         for position in positions:
             if position in self.areas: continue
-            table, rid = self.get_raster_locations(position)
+            table, rid = get_raster_locations(position)
+            self.areas[position] = Area(rid, position)
             if rid > 0:
                 if table in rids_to_load: rids_to_load[table].append(rid)
                 else: rids_to_load[table] = [rid]
         
         if not len(rids_to_load): return
-
+        
         for table in rids_to_load:
-            print(f"Loading {len(rids_to_load[table])} areas...")
-            table_name = format_table_name(table[0], table[1])
-            areas = get_multiple_rasters(table_name, rids_to_load[table])
-            for area in areas:
-                position = self.get_raster_position(area[0], table)
-                self.areas[position] = Area(area[0], position, area[1])
-            
-            print(f"Finished loading {len(rids_to_load[table])} areas...")
-
-    
-    @lru_cache(maxsize=None)
-    def get_raster_position(self, rid, table: Tuple[int, int]):
-        rid -= 1
-        horizontal_position = int(rid % 48) + table[1] * 48
-        vertical_position = int(rid / 48) + table[0] * 48
-        return (vertical_position, horizontal_position)
-
-    @lru_cache(maxsize=None)
-    def get_rid(self, position: Tuple[int,int]):
-        return position[0] * 48 + position[1] + 1
+            for rids in chunk_array(rids_to_load[table], 10):
+                thread = threading.Thread(target=get_multiple_rasters, args=[self.areas, table, rids])
+                thread.start()
 
     def render_regular_map(self, screen):
 
@@ -190,6 +158,7 @@ class WorldMap():
             indexes = area["indexes"]
             camera = area["camera"]
 
+            sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)  
             if self.draw_golden_center and area["position"] == self.map_center: nodes_positions = camera
 
             sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)                
@@ -202,18 +171,24 @@ class WorldMap():
                     dimensions = (x * NODE_SIZE, y * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                     current_node = column
                     if current_node == 0: color = BLUE
-                    else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+                    elif np.isnan(current_node): color = LIGHT_GREY
+                    else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 5000)
 
                     if self.draw_golden_center:
                         if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
                             color = GOLD
 
-                    self.color_set.add(color)
-                    pygame.draw.rect(screen, color, dimensions, 0)
+                    try:
+                        pygame.draw.rect(screen, color, dimensions, 0)
+                    except Exception as e:
+
+                        print(e)
+                        print(current_node, color)
+                        raise Exception
         
         if self.render_type == PARTIAL_RERENDER:
             
-            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            map_differences = find_changed_indices(original_map, self.displayed_map)
             rectangles_to_update = []
 
             for difference in map_differences:
@@ -221,6 +196,7 @@ class WorldMap():
                 current_node = self.displayed_map[difference[0]][difference[1]]
 
                 if current_node == 0: color = BLUE
+                elif np.isnan(current_node): color = LIGHT_GREY
                 else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
 
                 if self.draw_golden_center:
@@ -235,13 +211,14 @@ class WorldMap():
 
         if self.render_type == HYBRID_RERENDER:
 
-            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            map_differences = find_changed_indices(original_map, self.displayed_map)
 
             for difference in map_differences:
                 dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                 current_node = self.displayed_map[difference[0]][difference[1]]
 
                 if current_node == 0: color = BLUE
+                elif np.isnan(current_node): color = LIGHT_GREY
                 else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
 
                 if self.draw_golden_center:
@@ -261,7 +238,8 @@ class WorldMap():
         for area in area_to_check:
             indexes = area["indexes"]
             camera = area["camera"]
-            sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)
+            
+            sub_map = self.areas[area["position"]].get_displayed_nodes(self.zoom_level, indexes)  
             self.displayed_map[camera["starting_y"]:camera["ending_y"], camera["starting_x"]: camera["ending_x"]] = sub_map
 
             if self.draw_golden_center and area["position"] == self.map_center: nodes_positions = camera
@@ -286,6 +264,7 @@ class WorldMap():
 
                 for region in regions:
                     for node in region.coords:
+                        #if node == None: color = LIGHT_GREY
                         dimensions = (node[1] * NODE_SIZE, node[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                         pygame.draw.rect(screen, color, dimensions, 0)
                     
@@ -302,9 +281,6 @@ class WorldMap():
                             perimeter.append((node[1] * NODE_SIZE, node[0] * NODE_SIZE))
                         pygame.draw.lines(screen, BLACK, False ,perimeter)
 
-
-                        
-
         if self.render_type == PARTIAL_RERENDER:
             area_to_check = self.get_array_and_camera()
             original_map = self.displayed_map.copy()
@@ -317,7 +293,7 @@ class WorldMap():
                 if self.draw_golden_center:
                     if area["position"] == self.map_center: nodes_positions = camera
 
-            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            map_differences = find_changed_indices(original_map, self.displayed_map)
             rectangles_to_update = []
 
             for difference in map_differences:
@@ -325,6 +301,7 @@ class WorldMap():
                 current_node = self.displayed_map[difference[0]][difference[1]]
 
                 if current_node == 0: color = BLUE
+                elif current_node == None: color = LIGHT_GREY
                 else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
 
                 if self.draw_golden_center:
@@ -340,13 +317,14 @@ class WorldMap():
         if self.render_type == HYBRID_RERENDER:
 
             original_map = self.displayed_map.copy()
-            map_differences = self.find_changed_indices(original_map, self.displayed_map)
+            map_differences = find_changed_indices(original_map, self.displayed_map)
 
             for difference in map_differences:
                 dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                 current_node = self.displayed_map[difference[0]][difference[1]]
 
                 if current_node == 0: color = BLUE
+                elif current_node == None: color = LIGHT_GREY
                 else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
 
                 if self.draw_golden_center:
@@ -355,11 +333,6 @@ class WorldMap():
 
                 pygame.draw.rect(screen, color, dimensions, 0)
 
-
-    def find_changed_indices(self, original_array, modified_array):
-    # Trouver les indices où les valeurs sont différentes
-        changed_indices = np.argwhere(original_array != modified_array)
-        return changed_indices
 
     def get_new_area_near_center(self):
         positions = []
@@ -459,7 +432,6 @@ class WorldMap():
 
     def handle_movements(self, direction):
 
-        
         vertical_threshold = MAP_DIMENSIONS[0] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
         horizontal_threshold = MAP_DIMENSIONS[1] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
 
@@ -500,38 +472,4 @@ class WorldMap():
                 self.horizontal_offset += self.displacement        
 
 
-    def get_table_and_relative_position(self, position):
-        table_y = floor(position[0] / 48)
-        table_x = floor(position[1] / 48)
-        
-        relative_y = position[0] - (table_y * 48)
-        relative_x = position[1] - (table_x * 48)
-        return (table_y, table_x), (relative_y, relative_x)
-    
-    def get_raster_locations(self, position):
-        table, relative_position = self.get_table_and_relative_position(position)
-        rid = self.get_rid(relative_position)
 
-        return (table, rid)
-
-
-
-@lru_cache(maxsize=None)
-def interpolate(color_a, color_b, t):
-    return tuple(int(a + (b - a) * t) for a, b in zip(color_a, color_b))
-
-@lru_cache(maxsize=None)
-def round_to_nearest_x(x, base_value):
-    return x * round(base_value / x)
-
-def format_table_name(y, x):
-    y = f"{y:02}"
-    x = f"{x:02}"
-    return f"{y}_{x}"
-
-def generate_intervals(start, end, step):
-    intervals = []
-    for i in range(start, end + step, step):
-        intervals.append((i, i + step - 1 ,interpolate(LIGHTEST_GREEN, DARKEST_GREEN, (i + step - 1) / end)))
-
-    return intervals
