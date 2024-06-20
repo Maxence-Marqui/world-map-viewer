@@ -19,7 +19,7 @@ import threading
 class WorldMap():
     def __init__(self, map_center: tuple[int, int]) -> None:
         self.running: bool = True
-        self.zoom_level: int = 5
+        self.zoom_level: int = 5 
 
         self.screen_size: Tuple[int, int] = SIZE
         self.areas: Dict[Tuple[int,int], Area] = {}
@@ -133,8 +133,9 @@ class WorldMap():
         positions = self.get_new_area_near_center()
         rids_to_load: Dict[Tuple[int, int], List[int]] = {}
 
-        for position in positions:
+        for position in positions:            
             if position in self.areas: continue
+
             table, rid = get_raster_locations(position)
             self.areas[position] = Area(rid, position)
             if rid > 0:
@@ -170,21 +171,18 @@ class WorldMap():
                 for x, column in enumerate(row):
                     dimensions = (x * NODE_SIZE, y * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                     current_node = column
-                    if current_node == 0: color = BLUE
-                    elif np.isnan(current_node): color = LIGHT_GREY
-                    else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 5000)
+                    color = get_node_color(current_node)
 
                     if self.draw_golden_center:
-                        if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                        if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (
+                            nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
                             color = GOLD
-
                     try:
                         pygame.draw.rect(screen, color, dimensions, 0)
                     except Exception as e:
-
                         print(e)
-                        print(current_node, color)
-                        raise Exception
+                        print(column, color)
+
         
         if self.render_type == PARTIAL_RERENDER:
             
@@ -195,12 +193,11 @@ class WorldMap():
                 dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                 current_node = self.displayed_map[difference[0]][difference[1]]
 
-                if current_node == 0: color = BLUE
-                elif np.isnan(current_node): color = LIGHT_GREY
-                else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+                color = get_node_color(current_node)
 
                 if self.draw_golden_center:
-                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (
+                        nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
                         color = GOLD
 
                 self.color_set.add(color)
@@ -216,13 +213,11 @@ class WorldMap():
             for difference in map_differences:
                 dimensions = (difference[1] * NODE_SIZE, difference[0] * NODE_SIZE, NODE_SIZE, NODE_SIZE)
                 current_node = self.displayed_map[difference[0]][difference[1]]
-
-                if current_node == 0: color = BLUE
-                elif np.isnan(current_node): color = LIGHT_GREY
-                else: color = interpolate(LIGHTEST_GREEN, DARKEST_GREEN, current_node / 2000)
+                color = get_node_color(current_node)
 
                 if self.draw_golden_center:
-                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
+                    if (nodes_positions["starting_y"] <= y <= nodes_positions["ending_y"]) and (
+                        nodes_positions["starting_x"] <= x <= nodes_positions["ending_x"]): 
                         color = GOLD
 
                 self.color_set.add(color)
@@ -343,9 +338,18 @@ class WorldMap():
         if self.zoom_level == 2: starting_point, ending_point =  -6, 7
         if self.zoom_level == 1: starting_point, ending_point =  -11, 12
 
-        for i in range(starting_point,ending_point):
-            for j in range(starting_point,ending_point):
-                new_pos = (self.map_center[0] + i, self.map_center[1] + j)
+        for vertical_modifier in range(starting_point,ending_point):
+            for horizontal_modifier in range(starting_point,ending_point):
+
+                y_position = self.map_center[0] + vertical_modifier
+                if y_position < 0: y_position = 0
+                if y_position > MAX_VERTICAL_CHUNK: y_position = MAX_VERTICAL_CHUNK
+
+                x_position = self.map_center[1] + horizontal_modifier
+                if x_position < 0: x_position = MAX_HORIZONTAL_CHUNK - abs(horizontal_modifier)
+                if x_position > MAX_HORIZONTAL_CHUNK: x_position = 0 + horizontal_modifier
+                
+                new_pos = (y_position, x_position)
                 if not new_pos in self.areas: positions.append(new_pos)
 
         return positions
@@ -396,7 +400,15 @@ class WorldMap():
                            "starting_x": int(starting_x), 
                            "ending_x": int(ending_x)}
                 
-                area = {"position": (self.map_center[0] + vertical_modifier, self.map_center[1] + horizontal_modifier),
+                y_position = self.map_center[0] + vertical_modifier
+                if y_position < 0: y_position = 0
+                if y_position > MAX_VERTICAL_CHUNK: y_position = MAX_VERTICAL_CHUNK
+
+                x_position = self.map_center[1] + horizontal_modifier
+                if x_position < 0: x_position = MAX_HORIZONTAL_CHUNK - abs(horizontal_modifier)
+                if x_position > MAX_HORIZONTAL_CHUNK: x_position = 0 + horizontal_modifier
+                
+                area = {"position": (y_position, x_position),
                         "indexes": indexes, 
                         "camera": camera}
                 
@@ -436,6 +448,8 @@ class WorldMap():
         horizontal_threshold = MAP_DIMENSIONS[1] / 2 / ZOOM_LVL_MODIFICATOR[self.zoom_level]
 
         if direction == "up":
+            if self.map_center[0] == 0: return
+
             diff_until_change = abs(vertical_threshold - abs(self.vertical_offset))
             above_threshold = self.displacement - diff_until_change
             if above_threshold >= 0 and self.vertical_offset < 0:
@@ -445,6 +459,8 @@ class WorldMap():
                 self.vertical_offset -= self.displacement
 
         if direction == "down":
+            if self.map_center[0] == 350: return
+
             diff_until_change = abs(vertical_threshold - abs(self.vertical_offset))
             above_threshold = self.displacement - diff_until_change
             if above_threshold >= 0 and self.vertical_offset > 0:
@@ -458,7 +474,8 @@ class WorldMap():
             above_threshold = self.displacement - diff_until_change
             if above_threshold >= 0 and self.horizontal_offset < 0:
                 self.horizontal_offset = horizontal_threshold + above_threshold
-                self.map_center = (self.map_center[0], self.map_center[1] - 1)
+                if self.map_center[1] == 0: self.map_center = (self.map_center[0], MAX_HORIZONTAL_CHUNK)
+                else:self.map_center = (self.map_center[0], self.map_center[1] - 1)
             else:
                 self.horizontal_offset -= self.displacement
 
@@ -467,7 +484,8 @@ class WorldMap():
             above_threshold = self.displacement - diff_until_change
             if above_threshold >= 0 and self.horizontal_offset > 0:
                 self.horizontal_offset = -(horizontal_threshold - above_threshold)
-                self.map_center = (self.map_center[0], self.map_center[1] + 1)
+                if self.map_center[1] == 580: self.map_center = (self.map_center[0], 0)
+                else: self.map_center = (self.map_center[0], self.map_center[1] + 1)
             else:
                 self.horizontal_offset += self.displacement        
 

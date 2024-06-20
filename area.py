@@ -30,7 +30,7 @@ class Area:
         self.rid: int = rid
         self.position = raster_position
         self.raster = self.empty_raster
-        print(f"Loaded Raster {self.rid}: {self.position}")
+        #print(f"Loaded Raster {self.rid}: {self.position}")
 
     def convert_binary_to_np(self, raster_binary):
 

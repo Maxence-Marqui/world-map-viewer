@@ -74,8 +74,9 @@ def get_multiple_rasters(map_dict: Dict[Tuple[int,int], Area],  table: Tuple[int
         position = get_raster_position(area[0], table)
         map_dict[position].add_real_raster(area[1])
     
-    print(f"Finished loading {len(rids)} areas...")
+    #print(f"Finished loading {len(rids)} areas...")
 
+@lru_cache(maxsize=None)
 def get_table_and_relative_position(position):
     table_y = floor(position[0] / 48)
     table_x = floor(position[1] / 48)
@@ -83,7 +84,8 @@ def get_table_and_relative_position(position):
     relative_y = position[0] - (table_y * 48)
     relative_x = position[1] - (table_x * 48)
     return (table_y, table_x), (relative_y, relative_x)
-    
+
+@lru_cache(maxsize=None)
 def get_raster_locations(position):
     table, relative_position = get_table_and_relative_position(position)
     rid = get_rid(relative_position)
@@ -122,6 +124,7 @@ def generate_intervals(start, end, step):
 
     return intervals
 
+@lru_cache(maxsize=None)
 def find_changed_indices(original_array, modified_array):
     # Trouver les indices où les valeurs sont différentes
         changed_indices = np.argwhere(original_array != modified_array)
@@ -131,3 +134,9 @@ def chunk_array(array, chunk_size: int = 5) -> Generator[List, None, None]:
     """Divise un array en sous-groupes de taille maximale chunk_size."""
     for i in range(0, len(array), chunk_size):
         yield array[i:i + chunk_size]
+
+@lru_cache(maxsize=None)
+def get_node_color(node_value):
+    if node_value == 0: return BLUE
+    elif np.isnan(node_value) or node_value < 0 or node_value > 5000: return LIGHT_GREY
+    else: return interpolate(LIGHTEST_GREEN, DARKEST_GREEN, node_value / 2000)

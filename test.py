@@ -1,6 +1,6 @@
 import rasterio
 from matplotlib import pyplot
-src = rasterio.open("maps/00_02.tif")
+src = rasterio.open("maps/06_03.tif")
 
 dataset = src.read()[0]
 
