@@ -36,9 +36,6 @@ class ChunkDispacher:
         ending_index = self.chunk_height
         self.remaining_height -= abs(camera_end - camera_end)
         self.y_start = camera_end
-        
-        #if not camera_start < 0:
-        #    raise OutOfBoundError(self.chunk_height, "start_y", ) 
 
         return camera_start, camera_end, starting_index, ending_index
 
@@ -53,7 +50,6 @@ class ChunkDispacher:
         return camera_start, camera_end, 0, self.chunk_height
 
     def get_ending_y(self):
-        #print("end_y")
         starting_index = 0
         camera_start = self.y_start
         camera_end = self.y_start + self.chunk_height
@@ -68,7 +64,6 @@ class ChunkDispacher:
         return camera_start, camera_end, starting_index, ending_index
 
     def get_start_x(self):
-        #print("start_x")
         camera_start = 0
 
         if self.real_horizontal_offset == 0:
@@ -88,7 +83,6 @@ class ChunkDispacher:
         return camera_start, camera_end, starting_index, ending_index
 
     def get_middle_x(self):
-        #print("middle_x")
         
         camera_start = self.x_start
         camera_end = camera_start + self.chunk_width
@@ -99,7 +93,6 @@ class ChunkDispacher:
         return camera_start, camera_end, 0, self.chunk_width
     
     def get_ending_x(self):
-        #print("ending_x")
         
         camera_start = self.x_start
         camera_end = self.x_start + self.chunk_width

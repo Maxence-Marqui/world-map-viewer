@@ -2,35 +2,19 @@ import tempfile
 import rasterio
 
 from pygame_config import *
-from typing import List, Tuple
-from functools import wraps
+from typing import Tuple
 import numpy as np
-
-from time import time
-
-def timing(f):
-    @wraps(f)
-    def wrap(*args, **kw):
-        ts = time()
-        result = f(*args, **kw)
-        te = time()
-        print('func:%r args:[%r, %r] took: %2.8f sec' % \
-          (f.__name__, args, kw, te-ts))
-        return result
-    return wrap
 
 
 class Area:
 
-    test = "OUI"
     empty_raster = np.ndarray(shape=MAP_DIMENSIONS, dtype=None)
     empty_raster.fill(None)
 
-    def __init__(self, rid: int, raster_position: Tuple[int, int]) -> None:
+    def __init__(self, rid: int, position: Tuple[int, int]) -> None:
         self.rid: int = rid
-        self.position = raster_position
+        self.position = position
         self.raster = self.empty_raster
-        #print(f"Loaded Raster {self.rid}: {self.position}")
 
     def convert_binary_to_np(self, raster_binary):
 

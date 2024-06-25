@@ -1,23 +1,11 @@
 import psycopg2
 from typing import Generator, Tuple, List, Dict
-from time import time
-from functools import lru_cache, wraps
+from functools import lru_cache
 from pygame_config import *
 from math import floor
 import numpy as np
 from area import Area
 
-
-def timing(f):
-    @wraps(f)
-    def wrap(*args, **kw):
-        ts = time()
-        result = f(*args, **kw)
-        te = time()
-        print('func:%r args:[%r, %r] took: %2.4f sec' % \
-          (f.__name__, args, kw, te-ts))
-        return result
-    return wrap
 
 def connect_to_db():
     """Open a connexion to the database using the .env informations
@@ -33,7 +21,7 @@ def connect_to_db():
 
 def get_raster(rid):
 
-    request = """SELECT ST_AsGDALRaster(rast, 'GTiff') FROM a_world_map WHERE rid = {}""".format(rid)
+    request = f"""SELECT ST_AsGDALRaster(rast, 'GTiff') FROM a_world_map WHERE rid = {rid}"""
 
     try:
         connection = connect_to_db()
@@ -41,7 +29,7 @@ def get_raster(rid):
         cursor.execute(request)
         area = cursor.fetchone()[0]
     except Exception as e:
-        print(e)
+        print(f"Error with rid {rid}")
     finally:
         cursor.close()
         connection.close()
@@ -64,45 +52,76 @@ def get_multiple_rasters(map_dict: Dict[Tuple[int,int], Area],  table: Tuple[int
         cursor.execute(request, (rids,))
         areas = cursor.fetchall()
     except Exception as e:
-        print(e)
+        print(f"Error with chunks {rids} in table {table_name}")
         areas = []
     finally:
         cursor.close()
         connection.close()
-    
+
     for area in areas:
-        position = get_raster_position(area[0], table)
+        position = get_initial_position(table,area[0])
         map_dict[position].add_real_raster(area[1])
     
-    #print(f"Finished loading {len(rids)} areas...")
+    print(f"Finished loading {len(rids)} areas from table {table_name}.")
 
 @lru_cache(maxsize=None)
-def get_table_and_relative_position(position):
-    table_y = floor(position[0] / 48)
+def get_raster_db_locations(position: Tuple[int, int]):
+
+    table, relative_position = get_table_and_relative_position(position)
+    rid = get_rid(relative_position)
+    return (table, rid)
+
+@lru_cache(maxsize=None)
+def get_table_and_relative_position(position: Tuple[int, int]):
+
+    position_y = position[0]
+
+    if position_y <= 33:
+        table_y = 0
+        relative_y = position_y
+    else:
+        position_y -= 33
+        table_y = 1 + floor(position_y / 48)
+        relative_y = position_y - ((table_y - 1) * 48)
+        #if relative_y - 16
+
     table_x = floor(position[1] / 48)
-        
-    relative_y = position[0] - (table_y * 48)
     relative_x = position[1] - (table_x * 48)
+
     return (table_y, table_x), (relative_y, relative_x)
 
 @lru_cache(maxsize=None)
-def get_raster_locations(position):
-    table, relative_position = get_table_and_relative_position(position)
-    rid = get_rid(relative_position)
-
-    return (table, rid)
-
-
-@lru_cache(maxsize=None)
-def get_raster_position(rid, table: Tuple[int, int]):
-    rid -= 1
-    horizontal_position = int(rid % 48) + table[1] * 48
-    vertical_position = int(rid / 48) + table[0] * 48
-    return (vertical_position, horizontal_position)
-
-@lru_cache(maxsize=None)
-def get_rid(position: Tuple[int,int]):
+def get_rid(position: Tuple[int, int]):
     return position[0] * 48 + position[1] + 1
+
+# Fonction inverse
+def get_initial_position(table: Tuple[int, int], rid: int) -> Tuple[int, int]:
+
+    relative_position = get_position_from_rid(rid)
+    initial_position = get_initial_from_table_and_relative_position(table, relative_position)
+    
+    return initial_position
+
+@lru_cache(maxsize=None)
+def get_position_from_rid(rid: int) -> Tuple[int, int]:
+    relative_y = (rid - 1) // 48
+    relative_x = (rid - 1) % 48
+    return relative_y, relative_x
+
+@lru_cache(maxsize=None)
+def get_initial_from_table_and_relative_position(table: Tuple[int, int], relative_position: Tuple[int, int]) -> Tuple[int, int]:
+
+    table_y, table_x = table
+    relative_y, relative_x = relative_position
+
+    if table_y == 0:
+        initial_y = relative_y
+    else:            
+        initial_y = relative_y + table[0] * 48 - 16
+
+    initial_x = table_x * 48 + relative_x
+
+    return initial_y + 1, initial_x 
 
 @lru_cache(maxsize=None)
 def interpolate(color_a, color_b, t):

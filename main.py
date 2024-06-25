@@ -7,12 +7,14 @@ if __name__ == "__main__":
     
     #profiler = cProfile.Profile()
     #profiler.enable()
-    
-    #map = WorldMap((12+48,47*10))
-    map = WorldMap((0,0))
+    #map = WorldMap((1,1))
+    #map = WorldMap((33,45))
+    map = WorldMap((33+47,46))
     map.start()
+    print("----------------------------")
+    #map = WorldMap((47,1))
+    #map.start()
 
-    #print(len(map.color_set))
     #s = io.StringIO()
     #profiler.disable()
     #stats = pstats.Stats(profiler, stream=s).sort_stats('percall')
