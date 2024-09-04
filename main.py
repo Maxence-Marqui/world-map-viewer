@@ -1,19 +1,19 @@
 from world_map import WorldMap
+from dotenv import load_dotenv
+
 import cProfile
 import io
 import pstats
 
 if __name__ == "__main__":
+
+    load_dotenv()
     
     #profiler = cProfile.Profile()
     #profiler.enable()
-    #map = WorldMap((1,1))
-    #map = WorldMap((33,45))
-    map = WorldMap((33+47,46))
+
+    map = WorldMap((40, 0))
     map.start()
-    print("----------------------------")
-    #map = WorldMap((47,1))
-    #map.start()
 
     #s = io.StringIO()
     #profiler.disable()

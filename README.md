@@ -3,14 +3,17 @@ This project's purpose is to display the earth topology using Pygame and the [US
 
 The differents maps must be placed on a /maps folder in the project directory.  
 These maps must be renamed with a pattern "y_x.tif", kind of like reading an 2D array.  
-During development I focused on Europe, so the X is offset and Y_00.tif files represent the 6th map starting from the right.
 
-The database used is PostgreSQL with the postgis extension to store topographical data using rasters.
-To create that database, use this command:  
-`docker compose up -d`
+You will also need to create a .env file containing the following variables:
+- POSTGRES_DB_NAME
+- POSTGRES_DB_PASSWORD
+- POSTGRES_USER
+- IMAGE_PORT
 
-The next step is to save the maps in the database using the map_transfer.sh script.
-That script takes all the files in the /maps folder, convert them to .sql file and save them in tables with the file name as table name (For example the 00_00.tif file with create the 00_00 table filled with rasters).
+To setup the project database, use the command:
+`sh setup_project`
+Doing so will create a postgres database with the extensions needed to run the project, and then convert each file in the /maps folder into an sql dump which will be created in the /sql_archives folder, which will finally be saved in the database.
+The process can be quite long, as there is an huge amount of data being processed (each data point represent 250m²). Once it is done, you can start the map viewer. 
 
 To start the map viewer, use the command:  
 `python3 main.py`
@@ -41,4 +44,3 @@ The differents zoom levels are:
 
 In order to display the logs in the terminal, use the "s" key.  
 In order to replace the central raster by a golden rectangle, use the "g" key.
-

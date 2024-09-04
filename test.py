@@ -1,20 +1,40 @@
 """import rasterio
 from matplotlib import pyplot
-src = rasterio.open("maps/00_01.tif")
+import numpy as np
 
-dataset = src.read()[0]
 
-print(dataset.shape)
+#fig, axes = pyplot.subplots(2, 2)
+fig, axes = pyplot.subplots(2)
 
-dataset[dataset <= 0] = 5000
+#src_0_0 = rasterio.open("maps/00_11.tif")
+src_0_1 = rasterio.open("maps/00_00.tif")
+#src_1_0 = rasterio.open("maps/01_11.tif")
+src_1_1 = rasterio.open("maps/01_00.tif")
 
-pyplot.imshow(dataset, cmap='pink')
+#dataset_1 = src_0_0.read()[0]
+dataset_2 = src_0_1.read()[0]
+#dataset_3 = src_1_0.read()[0]
+dataset_4 = src_1_1.read()[0]
+
+
+#dataset_1[dataset_1 <= 0] = 5000
+dataset_2[dataset_2 <= 0] = 5000
+#dataset_3[dataset_3 <= 0] = 5000
+dataset_4[dataset_4 <= 0] = 5000
+
+#axes[0,0].imshow(dataset_1, cmap='pink')
+axes[0].imshow(dataset_2, cmap='pink')
+#axes[0].imshow(dataset_3, cmap='pink')
+axes[1].imshow(dataset_4, cmap='pink')
+
+pyplot.subplots_adjust(hspace=0, wspace=0)
 pyplot.show()"""
 
 
 from functools import lru_cache
 from math import floor
 from typing import Tuple
+
 
 @lru_cache(maxsize=None)
 def get_raster_db_locations(position: Tuple[int, int]):
@@ -31,14 +51,13 @@ def get_table_and_relative_position(position: Tuple[int, int]):
 
     position_y = position[0]
 
-    if position_y <= 33:
+    if position_y < 34:
         table_y = 0
         relative_y = position_y
     else:
-        position_y -= 33
+        position_y -= 34
         table_y = 1 + floor(position_y / 48)
         relative_y = position_y - ((table_y - 1) * 48)
-        #if relative_y - 16
 
     table_x = floor(position[1] / 48)
     relative_x = position[1] - (table_x * 48)
@@ -72,15 +91,19 @@ def get_initial_from_table_and_relative_position(table: Tuple[int, int], relativ
     if table_y == 0:
         initial_y = relative_y
     else:            
-        initial_y = relative_y + table[0] * 48 - 16
+        initial_y = relative_y + table[0] * 48 - 14
 
     initial_x = table_x * 48 + relative_x
 
-    return initial_y + 1, initial_x 
+    return initial_y, initial_x 
 
-for position in [(79, 45), (79, 46), (79, 47), (80, 45), (80, 46), (80, 47), (81, 45), (81, 46), (81, 47)]:
+for position in [(32, 41), (33, 41), (34, 19), (34, 20), (34, 21), 
+                 (34, 22), (34, 23), (34, 37), (34, 38), (34, 39), (34, 40), (34, 41), 
+                 (35, 19), (35, 20), (35, 21), (35, 22), (35, 23), (35, 37), (35, 38), 
+                 (35, 39), (35, 40), (35, 41), (36, 19), (36, 20), (36, 21), (36, 22), 
+                 (36, 23), (36, 37), (36, 38), (36, 39)]:
     print("---------------")
     table, rid = get_raster_db_locations(position)
     initial_position = get_initial_position(table, rid)
 
-    print("position", position, "initial_position", initial_position)
+    print("initial position", position, "new position", initial_position)

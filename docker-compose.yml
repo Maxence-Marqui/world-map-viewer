@@ -1,10 +1,11 @@
 version: '3'
 services:
   postgis:
-    container_name: world_map_db
-    image: postgis/postgis
+    container_name: world_map_test
+    image: kartoza/postgis
     environment:
-      - POSTGRES_PASSWORD=mypassword
-      - POSTGRES_DB=WorldMapProject
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASS=${POSTGRES_DB_PASSWORD}
+      - POSTGRES_DBNAME=${POSTGRES_DB_NAME}
     ports:
-      - "8001:5432"
+      - "${IMAGE_PORT}:5432"
