@@ -5,17 +5,17 @@ from pygame_config import *
 from math import floor
 import numpy as np
 from area import Area
-
+import os
 
 def connect_to_db():
     """Open a connexion to the database using the .env informations
     """
     connexion = psycopg2.connect(
         host="localhost",
-        database="WorldMapProject",
-        user="postgres",
-        password="mypassword",
-        port=8001)
+        database=os.getenv("POSTGRES_DB_NAME"),
+        user=os.getenv("POSTGRES_USER"),
+        password=os.getenv("POSTGRES_DB_PASSWORD"),
+        port=os.getenv("IMAGE_PORT"))
 
     return connexion
 
@@ -29,7 +29,7 @@ def get_raster(rid):
         cursor.execute(request)
         area = cursor.fetchone()[0]
     except Exception as e:
-        print(f"Error with rid {rid}")
+        print(f"Error with rid {rid}\n", e)
     finally:
         cursor.close()
         connection.close()
@@ -52,7 +52,7 @@ def get_multiple_rasters(map_dict: Dict[Tuple[int,int], Area],  table: Tuple[int
         cursor.execute(request, (rids,))
         areas = cursor.fetchall()
     except Exception as e:
-        print(f"Error with chunks {rids} in table {table_name}")
+        print(f"Error with chunks {rids} in table {table_name}\n", e)
         areas = []
     finally:
         cursor.close()
@@ -76,19 +76,34 @@ def get_table_and_relative_position(position: Tuple[int, int]):
 
     position_y = position[0]
 
-    if position_y <= 33:
+    if position_y < 34:
         table_y = 0
         relative_y = position_y
     else:
-        position_y -= 33
+        position_y -= 34
         table_y = 1 + floor(position_y / 48)
         relative_y = position_y - ((table_y - 1) * 48)
-        #if relative_y - 16
 
     table_x = floor(position[1] / 48)
     relative_x = position[1] - (table_x * 48)
 
+
     return (table_y, table_x), (relative_y, relative_x)
+
+@lru_cache(maxsize=None)
+def get_initial_from_table_and_relative_position(table: Tuple[int, int], relative_position: Tuple[int, int]) -> Tuple[int, int]:
+
+    table_y, table_x = table
+    relative_y, relative_x = relative_position
+
+    if table_y == 0:
+        initial_y = relative_y
+    else:            
+        initial_y = relative_y + table[0] * 48 - 14
+
+    initial_x = table_x * 48 + relative_x
+
+    return initial_y, initial_x 
 
 @lru_cache(maxsize=None)
 def get_rid(position: Tuple[int, int]):
@@ -108,20 +123,6 @@ def get_position_from_rid(rid: int) -> Tuple[int, int]:
     relative_x = (rid - 1) % 48
     return relative_y, relative_x
 
-@lru_cache(maxsize=None)
-def get_initial_from_table_and_relative_position(table: Tuple[int, int], relative_position: Tuple[int, int]) -> Tuple[int, int]:
-
-    table_y, table_x = table
-    relative_y, relative_x = relative_position
-
-    if table_y == 0:
-        initial_y = relative_y
-    else:            
-        initial_y = relative_y + table[0] * 48 - 16
-
-    initial_x = table_x * 48 + relative_x
-
-    return initial_y + 1, initial_x 
 
 @lru_cache(maxsize=None)
 def interpolate(color_a, color_b, t):

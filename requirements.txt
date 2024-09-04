@@ -1,3 +1,7 @@
-psycopg2
+psycopg2-binary
 pygame
 numpy
+rasterio
+scikit-image
+python-dotenv
+matplotlib

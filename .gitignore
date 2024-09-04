@@ -1,6 +1,8 @@
-maps
+maps/*
 used_maps
 __pycache__
+sql_archives/*
 .env
 test.txt
+test.py
 test_raster.sql
