@@ -3,6 +3,7 @@ This project's purpose is to display the earth topology using Pygame and the [US
 
 The differents maps must be placed on a /maps folder in the project directory.  
 These maps must be renamed with a pattern "y_x.tif", kind of like reading an 2D array.  
+
 You will also need to create a .env file containing the following variables:
 - POSTGRES_DB_NAME
 - POSTGRES_DB_PASSWORD
